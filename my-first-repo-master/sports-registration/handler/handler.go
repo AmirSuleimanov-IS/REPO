@@ -7,7 +7,6 @@ import (
 "sports-registration/internal/database"
 "sports-registration/models"
 "strconv"
-"strings"
 )
 
 type Handler struct {
