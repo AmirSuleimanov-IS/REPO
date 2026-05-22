@@ -1,21 +1,21 @@
 package models
 
-type TeamApplication struct {
-	ID           string       `json:"id"`
-	TeamName     string       `json:"team_name"`
-	CaptainID    string       `json:"captain_id"`
-	Members      []TeamMember `json:"members"`
-	TotalMembers int          `json:"total_members"`
-	MaxMembers   int          `json:"max_members"`
-	Status       string       `json:"status"`
-	CreatedAt    string       `json:"created_at"`
+import "time"
+
+type Application struct {
+	ID          uint      `gorm:"primaryKey;autoIncrement"`
+	UserID      uint      `gorm:"not null;index:idx_user_draft,where:status='draft'"`
+	Status      string    `gorm:"size:20;default:'draft';check:status IN ('draft','deleted','formed','completed','rejected')"`
+	CreatedAt   time.Time `gorm:"autoCreateTime"`
+	FormedAt    *time.Time
+	CompletedAt *time.Time
+	ModeratorID *uint
+	TeamName    string    `gorm:"size:100;not null"`
+	TotalAmount float64   `gorm:"type:decimal(10,2);default:0.00"`
+
+	Services []ApplicationService `gorm:"foreignKey:ApplicationID"`
 }
 
-type TeamMember struct {
-	AthleteID string `json:"athlete_id"`
-	Name      string `json:"name"`
-	Role      string `json:"role"`
-	EventID   string `json:"event_id"`
-	EventType string `json:"event_type"`
-	ImageKey  string `json:"image_key"`
+func (Application) TableName() string {
+	return "applications"
 }
