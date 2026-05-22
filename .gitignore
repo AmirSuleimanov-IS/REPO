@@ -1,33 +1,28 @@
 ```
-# Dependencies
-go.sum
-vendor/
-
-# Binaries
+# Compiled and build artifacts
+*.o
+*.obj
 *.exe
 *.dll
 *.so
-*.dylib
+*.a
+*.out
 
-# Build artifacts
-bin/
-pkg/
+# Dependencies
+vendor/
+*.mod
+*.sum
 
-# Logs
+# Logs and temp files
 *.log
-
-# Environment
-.env
-.env.local
-*.env.*
+*.tmp
+*.swp
 
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# OS
-.DS_Store
-Thumbs.db
+# Go-specific
+*.test
+*.prof
 ```
