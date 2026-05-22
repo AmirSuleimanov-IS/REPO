@@ -12,26 +12,30 @@
     
     <main class="main-content">
         <div class="page-header">
-            <h1>Спортивные события</h1>
-            <form class="search-form" action="/events" method="GET">
-                <input type="text" name="search" placeholder="Поиск событий..." value="{{.SearchQuery}}">
+            <h1>Спортивные услуги</h1>
+            <form class="search-form" action="/services" method="GET">
+                <input type="text" name="search" placeholder="Поиск услуг..." value="{{.Search}}">
                 <button type="submit" class="btn-search">🔍</button>
             </form>
         </div>
         
         <div class="cards-grid">
-            {{range .Events}}
+            {{range .Services}}
             <div class="event-card">
                 <div class="card-image">
                     <img src="http://localhost:9000/sports/{{.ImageKey}}" alt="{{.Name}}">
                 </div>
                 <div class="card-content">
-                    <span class="event-type">{{.Type}}</span>
+                    <span class="event-type">{{.Category}}</span>
                     <h3>{{.Name}}</h3>
-                    <p class="event-date">📅 {{.Date}}</p>
+                    <p class="event-date">📅 {{.EventDate}}</p>
                     <p class="event-location">📍 {{.Location}}</p>
-                    <p class="event-price">{{.Price}} ₽</p>
-                    <a href="/event?id={{.ID}}" class="btn btn-primary">Подробнее</a>
+                    <p class="event-price">{{.BasePrice}} ₽</p>
+                    <a href="/service?id={{.ID}}" class="btn btn-primary">Подробнее</a>
+                    <form method="POST" action="/application/add" style="display:inline;">
+                        <input type="hidden" name="service_id" value="{{.ID}}">
+                        <button type="submit" class="btn btn-secondary">В заявку</button>
+                    </form>
                 </div>
             </div>
             {{end}}

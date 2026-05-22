@@ -1,166 +1,221 @@
 package handler
 
 import (
-	"html/template"
-	"net/http"
-	"path/filepath"
-	"sports-registration/models"
-	"sports-registration/repository"
-	"strings"
+"html/template"
+"net/http"
+"path/filepath"
+"sports-registration/internal/database"
+"sports-registration/models"
+"strconv"
+"strings"
 )
 
 type Handler struct {
-	repo *repository.Repository
-	tmpl *template.Template
+tmpl *template.Template
 }
 
-func NewHandler(repo *repository.Repository) *Handler {
-	h := &Handler{repo: repo}
-	h.loadTemplates()
-	return h
+func NewHandler() *Handler {
+h := &Handler{}
+h.loadTemplates()
+return h
 }
 
 func (h *Handler) loadTemplates() {
-	funcs := template.FuncMap{
-		"eq": func(a, b string) bool { return a == b },
-	}
-	
-	// Получаем абсолютные пути к шаблонам
-	baseDir, err := filepath.Abs("templates")
-	if err != nil {
-		panic(err)
-	}
-	
-	// Сначала загружаем layout шаблоны
-	layoutFiles := []string{
-		filepath.Join(baseDir, "layout", "header.html"),
-		filepath.Join(baseDir, "layout", "footer.html"),
-	}
-	
-	// Затем основные страницы
-	pageFiles := []string{
-		filepath.Join(baseDir, "home.html"),
-		filepath.Join(baseDir, "athletes.html"),
-		filepath.Join(baseDir, "events.html"),
-		filepath.Join(baseDir, "athlete-detail.html"),
-		filepath.Join(baseDir, "event-detail.html"),
-		filepath.Join(baseDir, "team-application.html"),
-	}
-	
-	allFiles := append(layoutFiles, pageFiles...)
-	h.tmpl = template.Must(template.New("").Funcs(funcs).ParseFiles(allFiles...))
+funcs := template.FuncMap{
+"eq": func(a, b string) bool { return a == b },
+}
+
+// Получаем абсолютные пути к шаблонам
+baseDir, err := filepath.Abs("templates")
+if err != nil {
+panic(err)
+}
+
+// Сначала загружаем layout шаблоны
+layoutFiles := []string{
+filepath.Join(baseDir, "layout", "header.html"),
+filepath.Join(baseDir, "layout", "footer.html"),
+}
+
+// Затем основные страницы
+pageFiles := []string{
+filepath.Join(baseDir, "home.html"),
+filepath.Join(baseDir, "athletes.html"),
+filepath.Join(baseDir, "events.html"),
+filepath.Join(baseDir, "athlete-detail.html"),
+filepath.Join(baseDir, "event-detail.html"),
+filepath.Join(baseDir, "team-application.html"),
+}
+
+allFiles := append(layoutFiles, pageFiles...)
+h.tmpl = template.Must(template.New("").Funcs(funcs).ParseFiles(allFiles...))
+}
+
+// 1. GET /services → поиск активных услуг (ORM)
+func (h *Handler) ServicesHandler(w http.ResponseWriter, r *http.Request) {
+search := r.URL.Query().Get("search")
+var services []models.Service
+q := database.DB.Where("status = ?", "active")
+if search != "" {
+q = q.Where("name ILIKE ? OR category ILIKE ?", "%"+search+"%", "%"+search+"%")
+}
+q.Find(&services)
+
+var draftCount int64
+// Для демо фиксируем user_id = 1
+database.DB.Model(&models.Application{}).Where("user_id = 1 AND status = ?", "draft").Count(&draftCount)
+
+data := map[string]interface{}{
+"Services":    services,
+"Search":      search,
+"DraftCount":  draftCount,
+"PageTitle":   "Услуги",
+"CartCount":   draftCount,
+}
+
+h.tmpl.ExecuteTemplate(w, "events", data)
+}
+
+// 2. GET /service?id=X → детальная информация (ORM)
+func (h *Handler) ServiceDetailHandler(w http.ResponseWriter, r *http.Request) {
+idStr := r.URL.Query().Get("id")
+id, err := strconv.Atoi(idStr)
+if err != nil {
+http.Error(w, "Неверный ID услуги", http.StatusBadRequest)
+return
+}
+
+var svc models.Service
+result := database.DB.Where("id = ? AND status = ?", id, "active").First(&svc)
+if result.Error != nil {
+http.NotFound(w, r)
+return
+}
+
+data := map[string]interface{}{
+"Service":   svc,
+"PageTitle": svc.Name,
+}
+
+h.tmpl.ExecuteTemplate(w, "event-detail", data)
+}
+
+// 3. GET /application/draft → просмотр текущей заявки (ORM)
+func (h *Handler) ViewDraftHandler(w http.ResponseWriter, r *http.Request) {
+var app models.Application
+err := database.DB.Where("user_id = 1 AND status = ?", "draft").Preload("Services.Service").First(&app).Error
+if err != nil {
+http.Error(w, "Черновик не найден", http.StatusNotFound)
+return
+}
+
+data := map[string]interface{}{
+"Application": app,
+"PageTitle":   "Заявка #" + strconv.Itoa(int(app.ID)),
+"CartCount":   1,
+}
+
+h.tmpl.ExecuteTemplate(w, "team-application", data)
+}
+
+// 4. POST /application/add → добавление услуги в заявку (ORM)
+func (h *Handler) AddToApplicationHandler(w http.ResponseWriter, r *http.Request) {
+serviceIDStr := r.FormValue("service_id")
+serviceID, err := strconv.Atoi(serviceIDStr)
+if err != nil {
+http.Error(w, "Неверный ID услуги", http.StatusBadRequest)
+return
+}
+
+// Находим или создаем черновик заявки
+var app models.Application
+database.DB.Where("user_id = 1 AND status = ?", "draft").FirstOrCreate(&app, models.Application{
+UserID:   1,
+Status:   "draft",
+TeamName: "Kinetic Draft Team",
+})
+
+// Находим услугу
+var svc models.Service
+database.DB.First(&svc, serviceID)
+
+// Проверяем, есть ли уже эта услуга в заявке
+var appSvc models.ApplicationService
+found := database.DB.Where("application_id = ? AND service_id = ?", app.ID, svc.ID).First(&appSvc)
+
+if found.Error != nil {
+// Услуги нет, создаем новую запись
+appSvc = models.ApplicationService{
+ApplicationID: app.ID,
+ServiceID:     svc.ID,
+Quantity:      1,
+FinalPrice:    svc.BasePrice,
+RoleInEvent:   "participant",
+}
+database.DB.Create(&appSvc)
+} else {
+// Услуга есть, увеличиваем количество
+appSvc.Quantity++
+appSvc.FinalPrice = svc.BasePrice * float64(appSvc.Quantity) // 📐 ФОРМУЛА
+database.DB.Save(&appSvc)
+}
+
+// Пересчитываем общую сумму заявки
+var total float64
+database.DB.Model(&models.ApplicationService{}).Where("application_id = ?", app.ID).
+Select("COALESCE(SUM(final_price), 0)").Scan(&total)
+database.DB.Model(&app).Update("total_amount", total)
+
+http.Redirect(w, r, "/services", http.StatusSeeOther)
+}
+
+// 5. POST /application/delete → логическое удаление (RAW SQL, без ORM)
+func (h *Handler) DeleteDraftHandler(w http.ResponseWriter, r *http.Request) {
+idStr := r.FormValue("id")
+appID, err := strconv.Atoi(idStr)
+if err != nil {
+http.Error(w, "Неверный ID заявки", http.StatusBadRequest)
+return
+}
+
+// Логическое удаление через SQL UPDATE
+res := database.DB.Exec("UPDATE applications SET status = 'deleted', completed_at = NOW() WHERE id = ? AND status = 'draft'", appID)
+if res.RowsAffected == 0 {
+http.Error(w, "Заявка не найдена", http.StatusBadRequest)
+return
+}
+
+http.Redirect(w, r, "/services", http.StatusSeeOther)
 }
 
 func (h *Handler) AthletesHandler(w http.ResponseWriter, r *http.Request) {
-	athletes := h.repo.GetAllAthletes()
-
-	searchQuery := r.URL.Query().Get("search")
-	if searchQuery != "" {
-		filtered := make([]models.Athlete, 0)
-		for _, a := range athletes {
-			if strings.Contains(strings.ToLower(a.Name), strings.ToLower(searchQuery)) ||
-				strings.Contains(strings.ToLower(a.Category), strings.ToLower(searchQuery)) {
-				filtered = append(filtered, a)
-			}
-		}
-		athletes = filtered
-	}
-
-	data := map[string]interface{}{
-		"Athletes":    athletes,
-		"SearchQuery": searchQuery,
-		"CartCount":   h.repo.TeamApplication.TotalMembers,
-		"PageTitle":   "Атлеты",
-	}
-
-	h.tmpl.ExecuteTemplate(w, "athletes", data)
+h.ServicesHandler(w, r)
 }
 
 func (h *Handler) EventsHandler(w http.ResponseWriter, r *http.Request) {
-	events := h.repo.GetAllEvents()
-
-	searchQuery := r.URL.Query().Get("search")
-	if searchQuery != "" {
-		filtered := make([]models.Event, 0)
-		for _, e := range events {
-			if strings.Contains(strings.ToLower(e.Name), strings.ToLower(searchQuery)) ||
-				strings.Contains(strings.ToLower(e.Type), strings.ToLower(searchQuery)) ||
-				strings.Contains(strings.ToLower(e.Location), strings.ToLower(searchQuery)) {
-				filtered = append(filtered, e)
-			}
-		}
-		events = filtered
-	}
-
-	data := map[string]interface{}{
-		"Events":      events,
-		"SearchQuery": searchQuery,
-		"CartCount":   h.repo.TeamApplication.TotalMembers,
-		"PageTitle":   "События",
-	}
-
-	h.tmpl.ExecuteTemplate(w, "events", data)
+h.ServicesHandler(w, r)
 }
 
 func (h *Handler) AthleteDetailHandler(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "Athlete ID required", http.StatusBadRequest)
-		return
-	}
-
-	athlete, ok := h.repo.GetAthleteByID(id)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-
-	data := map[string]interface{}{
-		"Athlete":   athlete,
-		"CartCount": h.repo.TeamApplication.TotalMembers,
-		"PageTitle": athlete.Name,
-	}
-
-	h.tmpl.ExecuteTemplate(w, "athlete-detail", data)
+h.ServiceDetailHandler(w, r)
 }
 
 func (h *Handler) EventDetailHandler(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "Event ID required", http.StatusBadRequest)
-		return
-	}
-
-	event, ok := h.repo.GetEventByID(id)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-
-	data := map[string]interface{}{
-		"Event":     event,
-		"CartCount": h.repo.TeamApplication.TotalMembers,
-		"PageTitle": event.Name,
-	}
-
-	h.tmpl.ExecuteTemplate(w, "event-detail", data)
+h.ServiceDetailHandler(w, r)
 }
 
 func (h *Handler) TeamApplicationHandler(w http.ResponseWriter, r *http.Request) {
-	data := map[string]interface{}{
-		"Application": h.repo.TeamApplication,
-		"CartCount":   h.repo.TeamApplication.TotalMembers,
-		"PageTitle":   "Состав команды",
-	}
-
-	h.tmpl.ExecuteTemplate(w, "team-application", data)
+h.ViewDraftHandler(w, r)
 }
 
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
-	data := map[string]interface{}{
-		"CartCount": h.repo.TeamApplication.TotalMembers,
-		"PageTitle": "Главная",
-	}
-	
-	h.tmpl.ExecuteTemplate(w, "home", data)
+var draftCount int64
+database.DB.Model(&models.Application{}).Where("user_id = 1 AND status = ?", "draft").Count(&draftCount)
+
+data := map[string]interface{}{
+"CartCount": draftCount,
+"PageTitle": "Главная",
+}
+
+h.tmpl.ExecuteTemplate(w, "home", data)
 }
